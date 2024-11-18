@@ -7,18 +7,23 @@ from sys import argv
 if "dev" in argv:
     print("Dev mode on")
     Devmode = True
-    Root_path = "C:/1/"
     import extras as ex
 else:
     Devmode = False
-    Root_path = os.path.dirname(os.path.abspath(__file__)) + "/" # корневая папка, в которой лежат подпапки возвещателей и файлы программы
+
+Root_path = os.path.dirname(os.path.abspath(__file__)) + "/" # корневая папка, в которой лежат подпапки возвещателей и файлы программы
+
+if os.path.exists("settings.ini"): # загрузка настроек, если есть файл
+    with open("settings.ini", "r", encoding="utf-8", newline='') as file:
+        settings = file.read().splitlines()
+        Root_path = settings[0] # первая строка - путь к базе данных
 
 Subpath = []
 Subpath.append(Root_path + "Возвещатели/") # подпапки с файлами бланков S-21
 Subpath.append(Root_path + "Подсобные пионеры/")
 Subpath.append(Root_path + "Общие пионеры/")
 Filename = Root_path + "publishers.csv" # файл с собственной базой данных возвещателей
-Version = 3
+Version = 4
 Pub = []
 Values = []
 Bullet = "•"
@@ -30,7 +35,6 @@ from os.path import isfile, join
 import shutil
 import time
 import csv
-import datetime
 try:
     import requests
 except:
@@ -56,16 +60,6 @@ def load():
         if not os.path.exists(p):
             print(f"Папка {p} не найдена, создаю...")
             os.makedirs(p)
-
-    if os.path.exists(Root_path+"publishers.ini"): # конвертация старого формата, удалить в феврале
-        print("Найден файл устаревшего формата 'publishers.ini'. Загружаю и удаляю его...")
-        with open(Root_path+"publishers.ini", encoding="utf-8", newline='') as file:
-            reader = csv.reader(file, delimiter='\t')
-            for p in reader:
-                Pub.append([p[0], 0, int(p[2]), int(p[1]), int(p[3])])
-        save()
-        del Pub[:]
-        os.remove(Root_path + "publishers.ini")
 
     if not os.path.exists(Filename): # генерируем файл возвещателей, если его нет
         print("База данных не найдена, генерирую ее из папок...")
@@ -183,6 +177,10 @@ def nullify():
             shutil.copyfile(Filename, f"{Root_path}/Архив/publishers-{savedTime}.csv")
         for p in Pub: p[1] = p[2] = p[3] = p[4]= 0
         save()
+        pion_file = Root_path + "pioneers.csv" # удаление файла пионеров
+        if os.path.exists(pion_file):
+            shutil.copyfile(pion_file, f"{Root_path}/Архив/pioneers-{savedTime}.csv")
+            os.remove(pion_file)
         print("Отчеты успешно обнулены.")
     else: cls()
 
@@ -371,7 +369,9 @@ def pioneer_add(myinput):
         else:
             hours = myinput[3]
             plus = myinput[4]
-            if hours + plus >= 55:
+            if hours >= 55:  # если простых часов 55 или больше, игнорируем кредит в файле пионеров - ничего больше не делаем
+                pass
+            elif hours + plus >= 55:  # в противном случае, если часы и кредит превышают 55, используем формулу:
                 plus = plus - (-(55 - hours) + plus)
                 hours += plus
         pioneers.append([pioneer, hours])
@@ -539,33 +539,58 @@ def remaining():
 def export_groups():
     """ Экспортирует csv-файл с возвещателями, отсортированными по группам """
     def __numberize(name):
+        result = 0
         for char in name:
-            try: return int(char)
+            try: result = int(char)
             except: continue
+        return result
     Pub.sort(key=lambda x: __numberize(format_title(x[0])))
     count = 1
     group = 0
-    with open(Root_path + "groups.csv", 'w', encoding="utf-8", newline='') as file:
-        writer = csv.writer(file, delimiter='\t')
-        for p in Pub:
-            if str(group) not in format_title(p[0]):
-                count = 1
-                group += 1
-                writer.writerow("")
-                writer.writerow(["", f"\u00A0ГРУППА № {group}", "Служил(а)", "Изучения", "Часы\u00A0\u00A0\u00A0", "Кредит"])
-                writer.writerow("")
-            else:
-                count += 1
-            writer.writerow([
-                f"{count}",
-                f"\u00A0{format_title(p[0])}",
-                "☑" if p[1] != 0 else '',
-                str(p[2]) if p[2] != 0 else '',
-                str(p[3]) if p[3] != 0 and not 'Возвещатели' in p[0] else '',
-                str(p[4]) if p[4] != 0 else ''
-            ])
+
+    if 0: # текстовый вариант
+        groupfile = "groups.txt"
+        with open(Root_path + groupfile, 'w', encoding="utf-8", newline='') as file:
+            for p in Pub:
+                if str(group) not in format_title(p[0]):
+                    count = 1
+                    group += 1
+                    file.write("")
+                    file.write(f"\nГРУППА № {group}\t\t\t\t\tСлужил(а)\tИзучения\tЧасы\tКредит\n\n")
+                    file.write("")
+                else:
+                    count += 1
+                file.write(
+                    f"{count}\t{format_title(p[0])}\t\t{'☑' if p[1] != 0 else ''}\t\t\t" +\
+                    f"{str(p[2]) if p[2] != 0 else ''}\t\t\t" +\
+                    f"{str(p[3]) if p[3] != 0 and not 'Возвещатели' in p[0] else ''}\t\t" +\
+                    f"{str(p[4]) if p[4] != 0 else ''}\n"
+                )
+
+    else: # вариант CSV
+        groupfile = "groups.csv"
+        with open(Root_path + groupfile, 'w', encoding="utf-8", newline='') as file:
+            writer = csv.writer(file, delimiter='\t')
+            for p in Pub:
+                if str(group) not in format_title(p[0]):
+                    count = 1
+                    group += 1
+                    writer.writerow("")
+                    writer.writerow(["", f"\u00A0ГРУППА № {group}", "Служил(а)", "Изучения", "Часы\u00A0\u00A0\u00A0", "Кредит"])
+                    writer.writerow("")
+                else:
+                    count += 1
+                writer.writerow([
+                    f"{count}",
+                    f"\u00A0{format_title(p[0])}",
+                    "☑" if p[1] != 0 else "",
+                    p[2] if p[2] != 0 else "",
+                    str(p[3]) if p[3] != 0 and not 'Возвещатели' in p[0] else '',
+                    str(p[4]) if p[4] != 0 else ''
+                ])
+
     print("Успешно экспортировано, открываю файл...")
-    webbrowser.open(Root_path + "groups.csv")
+    webbrowser.open(Root_path + groupfile)
     Pub.sort(key=lambda x: x[0])
 
 def pioneers_show():
@@ -618,7 +643,7 @@ def report_entered(p):
 
 def format_report_string(p):
     """ Показывает расширение строки с возвещателем, если у него есть отчет (если нет, пусто) """
-    string = " →"# if report_entered(p) else ""
+    string = ""# →"# if report_entered(p) else ""
     string += "%5s" % (Check if p[1] is not None and p[1] != 0 else "")
     string += "%5s" % (str(p[2])+"и" if p[2] is not None and p[2] != 0 else "")
     string += "%5s" % (str(p[3])+"ч" if p[3] is not None and p[3] != 0 and not "Возвещат" in p[0] else "")
@@ -635,14 +660,11 @@ def cls(command=None, info_force=False):
 
     if not Devmode or info_force:
         os.system('cls' if os.name == 'nt' else 'clear')
-        update = str("{:%d.%m.%Y, %H:%M:%S}       ".format(
-            datetime.datetime.strptime(time.ctime((os.path.getmtime(Filename))), "%a %b %d %H:%M:%S %Y")))
         print(f"┌───────────────────────────────────────────────────────────────────────────┐")
         print(f"│ Добро пожаловать в Report Box!                                     (v. {Version}) │")
         print(f"│                                                                           │")
         print(f"│ Возвещателей в базе: {'{:<27}'.format(len(Pub))}                          │")
         print(f"│ C отчетами: {__get_pub_reported()}                                │")
-        print(f"│ Последнее изменение базы: {update}                     │")
         print(f"│                                                                           │")
         print(f"│ Введите команду и нажмите Enter:                                          │")
         print(f"│                                                                           │")
@@ -652,7 +674,7 @@ def cls(command=None, info_force=False):
         print(f"│ Иван 1 0 50     ввести отчет (служил, 0 изучений, 50 часов)               │")
         print(f"│ Иван 1 0 50 10  ввести отчет (служил, 0 изучений, 50 часов, 10 ч. кредит) │")
         print(f"│ +Пётр           создать нового возвещателя                                │")
-        print(f"│ :               список всех возвещателей                                  │")
+        print(f"│ %               список всех возвещателей                                  │")
         print(f"│ !               кто не сдал отчет                                         │")
         print(f"│ =               статистика собрания                                       │")
         print(f"│ *               обнулить все отчеты                                       │")
@@ -666,13 +688,13 @@ def update():
     if Devmode: return
     def __update(threadName, delay):
         try:
-            for line in requests.get("https://raw.githubusercontent.com/antorix/Report-Box/master/version"):
+            for line in requests.get("https://raw.githubusercontent.com/antorix/report-box/master/version"):
                 newVersion = int(line.decode('utf-8').strip())
         except: pass
         else:
             if newVersion > Version:
                 try:
-                    response = requests.get("https://github.com/antorix/Report-Box/archive/refs/heads/master.zip")
+                    response = requests.get("https://github.com/antorix/report-box/archive/refs/heads/master.zip")
                     import tempfile
                     import zipfile
                     file = tempfile.TemporaryFile()
@@ -725,7 +747,7 @@ while 1: # главный цикл программы
     elif command=="!": # кто не сдал отчет
         cls(command)
         remaining()
-    elif command==":": # показ всех возвещателей
+    elif command=="%": # показ всех возвещателей
         cls(command)
         list()
     elif command[0]=="+" and len(command)>1: # добавление нового возвещателя
